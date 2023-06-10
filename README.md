@@ -134,7 +134,7 @@ _Note this section is about constant variance models, which are only in the appe
 
 ### 2 Run simulation of guessing with(out) replacement
 
-- run `sampling_analysis/`[`sampling_simulation.ipynb`](sampling_simulation.ipynb) jupyter notebook (Julia 1.8) to calculate/simulate algorithm runtime
+- run `sampling_analysis/`[`sampling_simulation.ipynb`](sampling_analysis/sampling_simulation.ipynb) jupyter notebook (Julia 1.8) to calculate/simulate algorithm runtime
 
     - outputs dataframes to `plot_*_runtime_*.csv`
     - copy output CSVs into data dir for plotting (see below)
@@ -145,8 +145,8 @@ _Note this section is about constant variance models, which are only in the appe
 
 ### 3 Generate figures
 
-- run [`make_figures.qmd`](make_figures.qmd) R notebook (quarto, also included rendered as html and pdf)
-    - generates figures in [`./figures/`](./figures/) dir
+- figures are in [`./figures/`](./figures/) dir.
+- to generate these figures, run [`make_figures.qmd`](make_figures.qmd) R notebook (quarto), this notebook is also included rendered as [`html`](make_figures.html) and [`pdf`](make_figures.pdf)
 
 ----
 
