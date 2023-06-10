@@ -4,9 +4,9 @@ This repository contains code to accompany the article:
 
 - Preprint: [osf.io/qjnpv](https://doi.org/10.31234/osf.io/qjnpv)
 
-- [Surprisal Explorer](https://jahoo.shinyapps.io/surprisal_explorer/) --- an interactive visualization of LM surprisals and human reading times on Natural Stories.
+- See here for [Surprisal Explorer](https://jahoo.shinyapps.io/surprisal_explorer/) --- interactive visualization of LM surprisals and human reading times on Natural Stories.
 
-    ![](img/surprisal_explorer_snapshot.png)
+    <a href="https://jahoo.shinyapps.io/surprisal_explorer/"><img src="img/surprisal_explorer_snapshot.png" width="500"></img></a>
 
 ## Replication
 
