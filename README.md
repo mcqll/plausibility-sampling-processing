@@ -1,6 +1,4 @@
-This repository contains code to accompany the article:
-
-**The Plausibility of Sampling as an Algorithmic Theory of Sentence Processing**. Jacob Louis Hoover, Morgan Sonderegger, Steven T. Piantadosi, Timothy J. O'Donnell. Forthcoming in _Open Mind_ (2023). 
+This repository contains code to accompany the article **The Plausibility of Sampling as an Algorithmic Theory of Sentence Processing**. Jacob Louis Hoover, Morgan Sonderegger, Steven T. Piantadosi, Timothy J. O'Donnell. Forthcoming in _Open Mind_ (2023). 
 
 - Preprint: [osf.io/qjnpv](https://doi.org/10.31234/osf.io/qjnpv)
 
