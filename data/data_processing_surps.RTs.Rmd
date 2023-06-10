@@ -1,0 +1,601 @@
+---
+title: "data processing: surprisals and SPRT on naturalstories"
+author: "Jacob Louis Hoover"
+date: "Fall 2021"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook: default
+---
+
+```{r "setup", include=FALSE}
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+TODO: this whole thing is quite messy. Clean it up!
+
+```{r, include=FALSE}
+library(tidyverse)
+library(patchwork)
+library(NLP)
+theme_set(theme_minimal())
+```
+
+# Data loading
+
+```{r natural stories data dir, results='hide'}
+# naturalstories_rootdir <- "naturalstories/"
+# #uncomment to grab naturalstories data from GitHub instead of local path:
+naturalstories_rootdir <- "https://raw.githubusercontent.com/languageMIT/naturalstories/master/"
+```
+
+```{r dataloading gpt3 todo delete this, results='hide'}
+# I grab Futrell's surprisals from GPT3 here.  These should match exactly what we get later for GPT3-davinci (up to nondeterminism/whatever).  I will not use this version of GPT3 surprisals, but I'll leave the code in here for now.
+
+
+# notes about what's in the file all_stories_gpt3.csv:
+#  `story` is story index in 0...9  <== I'll mutate this to story_num using 1-indexing
+#  `token` is wordpiece
+#  `offset` is start position of `token`, from beginning of story
+
+# Commented out, since we wont use it.
+# gpt3 <- read_csv(
+#   paste0(naturalstories_rootdir, "probs/all_stories_gpt3.csv")
+#   ) %>%
+#   mutate(story_num = story + 1,
+#          surprisal = -logprob,
+#          modelname = "GPT3") %>%
+#   select(-c("time", "id", "story", "logprob")) %>%
+#   rename(story_offset = offset)
+```
+
+Get surprisals from huggingface models, and join into dataframe `gpts` with gpt3 surprisals too.
+
+```{r dataloading huggingface gpt models, results='hide'}
+surps.dir <- "LM_surprisals_OLD/"
+
+load_surprisals <- function(
+    modelname, bysent=FALSE, dir=surps.dir,
+    csvfile_basename = "naturalstories_surprisals_") {
+  #' get from e.g. somedir/naturalstories_surprisals_GPT2.csv
+  df <- read_csv(
+    paste0(dir, csvfile_basename, modelname, ".csv"),
+    trim_ws = FALSE) %>% 
+    mutate(modelname = modelname)
+  if (bysent) { # for bysent, need to separate to storynum and sentence num
+    df <- df %>% separate(
+      string_id, into = c("story_num", "sentence_num")) %>%
+      mutate(across(c(story_num, sentence_num), as.double)) %>%
+      rename(sentence_offset = offset)
+  } else { # one sentence per string, so string_id is just story num
+    df <- df %>%
+      rename(story_num = string_id, story_offset = offset) %>% 
+      mutate(across(story_num, as.double))
+  }
+}
+
+# I'll use this one to get by_sentence info into the other models for convenience
+TXL_bysent <- load_surprisals("TXL_bysent", bysent = TRUE) %>% 
+  group_by(story_num,sentence_num) %>% 
+  arrange(sentence_offset) %>% 
+  mutate(txl_word_num_in_sent=1:n()) %>% 
+  mutate(txl_word_id=paste(story_num, sentence_num, txl_word_num_in_sent, sep="_")) %>% ungroup() %>% 
+  arrange(story_num, sentence_num, txl_word_num_in_sent)
+
+TXL_80       <- load_surprisals("TXL_80") %>% bind_cols(TXL_bysent %>% select(txl_word_id))
+# TXL_1000   <- load_surprisals("TXL_1000")%>% bind_cols(TXL_bysent %>% select(txl_word_id))
+TXL   <- load_surprisals("TXL_4000") %>% bind_cols(TXL_bysent %>% select(txl_word_id)) %>% 
+            mutate(modelname="TXL")
+txls <- TXL_bysent %>%
+  full_join(TXL_80) %>%
+  # full_join(TXL_1000) %>%
+  full_join(TXL) %>%
+  select(-c(model, sentence_num, txl_word_num_in_sent, contains("offset"))) %>%
+  pivot_wider(
+    names_from = modelname, values_from = surprisal,
+    names_prefix = "surp_")
+
+
+gpt3d_bysent <- load_surprisals("GPT3-davinci_bysent", bysent = TRUE) %>%
+  group_by(story_num,sentence_num) %>%
+  arrange(sentence_offset) %>%
+  mutate(gpt2_word_num_in_sent=1:n()) %>%
+  mutate(gpt2_word_id=paste(story_num,sentence_num,gpt2_word_num_in_sent,sep="_")) %>% ungroup() %>% 
+  arrange(story_num,sentence_num,gpt2_word_num_in_sent)
+gpt3c_bysent <- load_surprisals("GPT3-curie_bysent", bysent = TRUE) %>% bind_cols(gpt3d_bysent %>% select(gpt2_word_id))
+gpt3a_bysent <- load_surprisals("GPT3-ada_bysent", bysent = TRUE) %>% bind_cols(gpt3d_bysent %>% select(gpt2_word_id))
+
+gpt3d <- load_surprisals("GPT3-davinci") %>% bind_cols(gpt3d_bysent %>% select(gpt2_word_id))
+gpt3c <- load_surprisals("GPT3-curie") %>% bind_cols(gpt3d_bysent %>% select(gpt2_word_id))
+gpt3a <- load_surprisals("GPT3-ada") %>% bind_cols(gpt3d_bysent %>% select(gpt2_word_id))
+gpt3s <- gpt3d %>% 
+  full_join(gpt3c) %>% 
+  full_join(gpt3a) %>% 
+  select(-c(openai_engine, id, created))
+gpt3s_bysent <- gpt3d_bysent %>%
+  full_join(gpt3c_bysent) %>% 
+  full_join(gpt3a_bysent) %>%
+  select(-c(openai_engine, id, created))
+
+# You can see where the issues come in: 
+# gpt3a_bysent %>% bind_cols(gpt3 %>% filter(!(token=="T" & story_offset == 0))) %>% filter(token...1 != token...12)  
+
+# TODO: get GPT1 in here
+# gpt1_bysent  <- load_surprisals("GPT1_bysent", bysent=T) %>%
+#   group_by(story_num,sentence_num) %>%
+#   arrange(sentence_offset) %>%
+#   mutate(gpt1_word_num_in_sent=1:n()) %>%
+#   mutate(gpt1_word_id=paste(story_num,sentence_num,gpt1_word_num_in_sent,sep="_")) %>% ungroup() %>% 
+#   arrange(story_num,sentence_num,gpt1_word_num_in_sent)
+# gpt1_80       <- load_surprisals("GPT1_80") %>% bind_cols(gpt1_bysent %>% select(gpt1_word_id))
+# gpt1          <- load_surprisals("GPT1") %>% bind_cols(gpt1_bysent %>% select(gpt1_word_id))
+
+gpt2_bysent <- load_surprisals("GPT2_bysent", bysent = TRUE) %>%
+  group_by(story_num,sentence_num) %>%
+  arrange(sentence_offset) %>%
+  mutate(gpt2_word_num_in_sent=1:n()) %>%
+  mutate(gpt2_word_id=paste(story_num,sentence_num,gpt2_word_num_in_sent,sep="_")) %>% ungroup() %>% 
+  arrange(story_num,sentence_num,gpt2_word_num_in_sent)
+
+gpt2l_bysent  <- load_surprisals("GPT2-large_bysent", bysent=T) %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gpt2xl_bysent <- load_surprisals("GPT2-xl_bysent", bysent=T) %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gptj_bysent   <- load_surprisals("GPT-J_bysent", bysent=T) %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gptneo_bysent <- load_surprisals("GPT-Neo_bysent", bysent=T) %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+
+gpt2_80       <- load_surprisals("GPT2_80") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gpt2l_80      <- load_surprisals("GPT2-large_80") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gpt2xl_80     <- load_surprisals("GPT2-xl_80") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gptj_80       <- load_surprisals("GPT-J_80") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gptneo_80     <- load_surprisals("GPT-Neo_80") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+
+gpt2          <- load_surprisals("GPT2") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gpt2l         <- load_surprisals("GPT2-large") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gpt2xl        <- load_surprisals("GPT2-xl") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gptj          <- load_surprisals("GPT-J") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+gptneo        <- load_surprisals("GPT-Neo") %>% bind_cols(gpt2_bysent %>% select(gpt2_word_id))
+
+gpts_bysent <- gpt2_bysent %>% 
+  full_join(gpt2l_bysent) %>% 
+  full_join(gpt2xl_bysent) %>% 
+  full_join(gptj_bysent) %>% 
+  full_join(gptneo_bysent) %>%
+  full_join(gpt3s_bysent) %>% 
+  # don't include the bysent-specific (we'll use the story_offset after merging with _bystory if needed)
+  select(-c(model, sentence_num, gpt2_word_num_in_sent, sentence_offset)) %>%
+  pivot_wider(
+    names_from = modelname, values_from = surprisal, 
+    names_prefix = "surp_") %>% 
+  rename(token_gpt_bysent = token)
+# # To take care of tokenization minor differences 
+# # so that the surprisals will align correctly (?)
+# # since stories 9 and 10 start with a space according to GPT tokenization
+# mutate(story_offset = ifelse(
+#   story_num %in% c(9,10) & story_offset > 0, 
+#   story_offset - 1,
+#   story_offset)) %>% 
+
+
+gpts_bystory <- gpt2 %>%
+  full_join(gpt2l) %>%
+  full_join(gpt2xl) %>%
+  full_join(gptj) %>%
+  full_join(gptneo) %>%
+  full_join(gpt2_80) %>%
+  full_join(gpt2l_80) %>%
+  full_join(gpt2xl_80) %>%
+  full_join(gptj_80) %>%
+  full_join(gptneo_80) %>%
+  full_join(gpt3s) %>%
+  select(-model) %>%
+  pivot_wider(
+    names_from = modelname, values_from = surprisal, 
+    names_prefix = "surp_") %>% 
+  rename(token_gpt_bystory = token)
+
+gpts <- full_join(gpts_bystory, gpts_bysent, by = c("story_num", "gpt2_word_id")) %>% 
+  select(story_num, token_gpt_bystory, token_gpt_bysent, gpt2_word_id, story_offset, everything())
+
+# Print model info for easy reference
+print(map_df(
+  list(gpt3d,gpt3a,gpt2,gpt2l,gpt2xl,gptj,gptneo,TXL),
+  function(df){data.frame(modelname=df$modelname[1],model_info=df$model[1])}))
+# then remove those dfs
+rm(
+  #gpt3,
+  gpt3d,gpt3a,gpt3c,gpt3s,
+  gpt2,gpt2l,gpt2xl,gptj,gptneo,gpts_bystory,TXL,
+  gpt3d_bysent,gpt3a_bysent,gpt3c_bysent,gpt3s_bysent,
+  gpt2_bysent,gpt2l_bysent,gpt2xl_bysent,gptj_bysent,gptneo_bysent,gpts_bysent,TXL_bysent,
+  gpt2_80,gpt2l_80,gpt2xl_80,gptj_80,gptneo_80,TXL_80
+)
+```
+
+```{r}
+get_duplicate_word_ids <- function(d, w_id) {
+  duplicate_ids<-d %>% 
+    group_by({{w_id}}) %>% 
+    summarise(n_duplicate_ids=n(), .groups="drop") %>% 
+    filter(n_duplicate_ids>1)
+  d %>% inner_join(duplicate_ids) %>% arrange({{w_id}})
+}
+assertthat::are_equal( # check that there are no duplicates
+  nrow(get_duplicate_word_ids(txls %>% mutate(word=trimws(token)), txl_word_id)),
+  0)
+assertthat::are_equal( # check that there are no duplicates
+  nrow(get_duplicate_word_ids(gpts %>% mutate(word=token_gpt_bystory), gpt2_word_id)),
+  0)
+# If needed, inspect, like
+# get_duplicate_word_ids(gpts %>% mutate(word=token_gpt_bystory), gpt2_word_id)
+```
+
+```{r}
+# Now, look at words that are not tokenized the same by the bysent and bystory versions of GPT...
+# since there's only one instance of this 
+# (one word "Traders" at the start of story 9 sentence 27, broken into two tokens differently by the two versions)
+# I'll just use the bystory version as the default one saved in token_gpt_trimws
+print(gpts %>% filter(trimws(token_gpt_bystory)!=trimws(token_gpt_bysent)))
+
+gpts <- gpts %>% 
+  mutate(token_gpt_trimws = trimws(token_gpt_bystory)) %>%
+  select(token_gpt_trimws, starts_with("token"), c(everything()))
+```
+
+## Getting natural stories SPRT data
+
+```{r dataloading naturalstories annotations, results='hide'}
+naturalstories_conllx <- NLP::CoNLLTextDocument(
+  paste0(naturalstories_rootdir,"parses/ud/stories-aligned.conllx"), 
+  format="conllx", meta=list(
+    corpus="Natural Stores", 
+    annotation = "Universal Dependencies (CONLLX format)"))
+
+# Note, the following CONNLX fields are not used 
+# in this dataset (all are identically "_")
+# PHEAD, FEATS, LEMMA
+naturalstories_conllx_data <- as_tibble(naturalstories_conllx$content) %>%
+  select(UD_form = FORM,
+    UD_CPOS = CPOSTAG, UD_POS = POSTAG, #<- POS info
+    UD_deprel = DEPREL, UD_ID = ID, UD_head = HEAD, UD_sent = sent, #<-- deprel info
+    TokenId = PDEPREL) %>%
+  transform(TokenId = sub("TokenId=", "", TokenId)) %>%
+  separate(TokenId, into = c("item", "zone", "part"),
+           sep = "\\.", extra = "drop", fill = "right", convert = TRUE)
+
+naturalstories_UDinfo_raw <- naturalstories_conllx_data %>%
+  group_by(item, zone) %>%
+  # collapse things that are more than one token per "zone" (multitoken words)
+  transmute(
+    CONLLXform = paste0(UD_form, collapse = ""),
+    CPOS       = paste0(UD_POS, collapse = ";"),
+    Cdeprel    = paste0(UD_deprel, collapse = ";"),
+    CwordID    = paste0(UD_ID, collapse = ";"),
+    Csent      = if_else(
+      length(unique(UD_sent)) == 1,
+      as.character(UD_sent[1]),
+      paste0(UD_sent, collapse = ";")),
+    CheadID    = paste0(UD_head, collapse = ";"),
+  ) %>% # select(-starts_with("UD_")) %>%
+  unique() %>%
+  ungroup()
+
+rm(naturalstories_conllx, naturalstories_conllx_data)
+```
+
+```{r}
+simplify_POS <- function(CPOScol) {
+  # Remove complex multi-POS tags when due to punctuation
+  # leave in multi-POS tags that are true conjunctions, compounds, etc.
+  CPOScol %>% 
+    str_remove_all(";-RRB-") %>% 
+    str_remove_all("-LRB-;") %>% 
+    str_remove_all(";[[:punct:]]+") %>% 
+    str_remove_all("``;") %>% 
+    str_remove_all(";CC$")
+}
+
+simplify_deprel <- function(Cdeprelcol) {
+  # Remove complex multi-deprel tags when due to punctuation
+  # leave in multi-deprel tags that are true conjunctions, compounds, etc.
+  Cdeprelcol %>% 
+    str_remove_all(";punct") %>%
+    str_remove_all("punct;") %>% 
+    str_remove_all(";cc")
+}
+
+# Save these simplified POS tags and deprel tags to the data
+naturalstories_UDinfo <- naturalstories_UDinfo_raw %>% 
+  mutate(POS = simplify_POS(CPOS)) %>% 
+  mutate(deprel = simplify_deprel(Cdeprel))
+```
+
+```{r}
+# Here are of the leftover complex POS tags
+naturalstories_UDinfo %>% 
+  filter(str_detect(POS, ";")) %>% 
+  group_by(POS) %>% 
+  summarise(n=n(), "CPOS types collapsed"=paste(unique(CPOS), collapse=" • "),
+            "example types collapsed"=paste(unique(CONLLXform), collapse=" • ")) %>% 
+  arrange(desc(n))
+```
+
+```{r}
+# Here are of the leftover complex POS tags
+naturalstories_UDinfo %>% 
+  filter(str_detect(deprel, ";")) %>% 
+  group_by(deprel) %>% 
+  summarise(n=n(), "Cdeprel types collapsed"=paste(unique(Cdeprel), collapse=" • "), 
+            "example types collapsed"=paste(unique(CONLLXform), collapse=" • ")) %>% 
+  arrange(desc(n))
+```
+
+```{r dataloading naturalstories SPRT, results='hide'}
+# in processed_wordinfo.tsv,
+#  `item` is story index in 1...10
+#  `zone` is position (index of word) in story (1...~1000)
+RTs.perword <- read_tsv(
+  paste0(naturalstories_rootdir,"naturalstories_RTS/processed_wordinfo.tsv")
+  ) %>% 
+  # Add in the POS and deprel info from UD CONLLX annotation
+  full_join(naturalstories_UDinfo, by = c("zone", "item")) %>%
+  rename(story_num=item, word_num_in_story=zone) %>%
+  arrange(story_num,word_num_in_story) %>% 
+  mutate(word = gsub("([[:punct:]])"," \\1",word)) %>%     # put space before punctuation
+  mutate(word = gsub("(-)([a-zA-Z])","\\1 \\2",word)) %>%  # put space after hyphen
+  mutate(word = gsub("^( )([[:punct:]])","\\2\\1",word))   # fix string beginning with punct
+
+# Same for the full data not averaged per speaker
+RTs <- read_tsv(
+  paste0(naturalstories_rootdir,"naturalstories_RTS/processed_RTs.tsv")
+  ) %>% full_join(naturalstories_UDinfo, by = c("zone", "item")) %>% 
+  rename(story_num=item, word_num_in_story=zone) %>%
+  arrange(story_num,word_num_in_story) %>%
+  mutate(word = gsub("([[:punct:]])"," \\1",word)) %>%
+  mutate(word = gsub("(-)([a-zA-Z])","\\1 \\2",word)) %>%
+  mutate(word = gsub("^( )([[:punct:]])","\\2\\1",word))
+
+# # Could get RTs.perword from RTs like this:
+RTs.perword_ <- RTs %>% select(-c(meanItemRT,sdItemRT,gmeanItemRT,gsdItemRT)) %>% 
+  group_by(story_num,word_num_in_story) %>% 
+  summarise(meanItemRT=mean(RT), sdItemRT=sd(RT), gmeanItemRT=gmean(RT), gsdItemRT=gsd(RT), .groups='drop') %>%
+  full_join(RTs %>% 
+              select(-c(meanItemRT,sdItemRT,gmeanItemRT,gsdItemRT,WorkerId,WorkTimeInSeconds,correct,RT)) %>% 
+              distinct())
+```
+
+In total, the 10 stories of the *naturalstories* dataset is a corpus of `r length(RTs.perword$word)` tokens in the selfpaced reading data, but `r length(gpts$token)` tokens long in GPT-tokenized data, because of different tokenization (GPT3 data splits punctuation from prev word, and splits up some less frequent words into multiple tokens).
+
+So, we align the tokenizations reasonably well (some room for improvement), and keep only the tokens that are the same in both tokenizations to be conservative.
+
+```{r, include=F}
+# check to see the vocabs are not too different
+naturalstories_wordinfo <- read_tsv(
+  paste0(naturalstories_rootdir,"words.tsv"), col_names = c("id","word")
+  ) %>%
+  separate(id, into=c("story_num","word_num_in_story","wordpart")) %>% 
+  mutate(story_num=as.numeric(story_num),word_num_in_story=as.numeric(word_num_in_story))
+naturalstories_wordp_whole_vocab <- unique(filter(naturalstories_wordinfo,wordpart=="whole")$word)
+naturalstories_wordp_word_vocab <- unique(filter(naturalstories_wordinfo,wordpart=="word")$word)
+
+naturalstories_tokenized_for_humans <- read_tsv(
+      paste0(naturalstories_rootdir,"naturalstories_RTS/all_stories.tok")
+      ) %>% 
+      rename(story_num=item, word_num_in_story=zone)
+write_lines(naturalstories_tokenized_for_humans, "./naturalstories_story_per_line.txt")
+
+naturalstories_sentences <- naturalstories_wordinfo %>% 
+  pivot_wider(names_from = wordpart, values_from = word, names_prefix = "wordp_" ) %>% 
+  full_join(
+    naturalstories_tokenized_for_humans,
+    by = c("story_num", "word_num_in_story")) %>% rename(word_human=word) %>% 
+  select(story_num,word_num_in_story,word_human,wordp_whole,wordp_word,wordp_1) 
+
+# txl_vocab <- unique(TXL$token)
+gpt_vocab <- unique(gpts$token_gpt_trimws)
+RTs_vocab <- unique(RTs$word)
+common_vocab <- intersect(RTs_vocab,gpt_vocab)
+
+setdiff(naturalstories_wordp_whole_vocab,RTs_vocab)
+setdiff(RTs_vocab,naturalstories_wordp_whole_vocab)
+
+# setdiff(naturalstories_wordp_whole_vocab,gpt_vocab)
+# setdiff(gpt_vocab,naturalstories_wordp_whole_vocab)
+```
+
+**Setting up RT vs surprisal datasets** one with per-word RT data, and the other with all the data (per subject RT per word).
+
+```{r, include=F}
+
+gpts_nth<-gpts %>%   mutate(word = token_gpt_trimws) %>% #rename(word=token) %>%
+  group_by(story_num, word) %>% 
+  mutate(nth_occurence_in_story = 1:n()) %>% 
+  ungroup() %>% 
+  select(-starts_with("surp"), everything())
+
+RTs.perword_nth <- RTs.perword %>% 
+  group_by(story_num, word) %>% 
+  mutate(nth_occurence_in_story=1:n()) %>%
+  full_join(naturalstories_sentences,
+            by = c("word_num_in_story", "story_num")) %>% 
+  # mutate(word=wordp_word) %>%  # use the "word" wordpart from ns data, the often to align with the GPT tokenizer (which separates off punctuation)
+  ungroup() %>% 
+  select(starts_with("word"), story_num, everything())
+
+#### perword data has RTs means and sds
+gpts.RTs.perword <- full_join(
+  gpts_nth,
+  RTs.perword_nth,
+  by=c("story_num","word","nth_occurence_in_story")) %>% 
+  mutate(is_in_common_vocab = word %in% common_vocab,
+         wordlength = nchar(word))
+
+txls_nth<-txls %>% rename(word=token) %>% 
+  group_by(story_num,word) %>% 
+  mutate(nth_occurence_in_story=1:n()) %>% 
+  ungroup()
+
+lms_nth <- gpts_nth %>% 
+  full_join(txls_nth, by = c("story_num", "word", "nth_occurence_in_story")) %>% 
+  select(word, -starts_with("surp"), everything())
+
+lms.RTs.perword <- full_join(
+  lms_nth,
+  RTs.perword_nth,
+  by=c("story_num","word","nth_occurence_in_story")) %>% 
+  mutate(is_in_common_vocab = word %in% common_vocab,
+         wordlength = nchar(word))
+
+gpt_prop_tokens_kept <- 
+  nrow(lms.RTs.perword %>% filter(is_in_common_vocab, !is.na(gpt2_word_id))) / 
+  nrow(lms.RTs.perword %>% filter(!is.na(gpt2_word_id)))
+txl_prop_tokens_kept <- 
+  nrow(lms.RTs.perword %>% filter(is_in_common_vocab, !is.na(txl_word_id))) / 
+  nrow(lms.RTs.perword %>% filter(!is.na(txl_word_id)))
+
+#### Full data has all the RTs not just means and sds
+
+gpts.RTs <- full_join(
+  gpts.RTs.perword,
+  RTs %>% select(-word)) %>% 
+  filter(!is.na(meanItemRT), word_num_in_story!=1)
+lms.RTs <- full_join(
+  lms.RTs.perword,
+  RTs %>% select(-word)) %>% 
+  filter(!is.na(meanItemRT), word_num_in_story!=1) %>%
+  select(story_num, word_num_in_story, WorkerId, RT, everything())
+```
+
+```{r}
+# Check for problematic alignments (with duplicate ids).  
+# TODO: There are a lot of NAs. These are words which have different tokenizations.
+#       It would be nice to hack a way to have fewer, but not necessary.
+get_duplicate_word_ids(lms.RTs.perword %>% drop_na(txl_word_id),txl_word_id) %>% 
+  select(word, word_human, n_duplicate_ids, everything())
+get_duplicate_word_ids(gpts.RTs.perword %>% drop_na(gpt2_word_id), gpt2_word_id) %>% 
+  select(word, word_human, n_duplicate_ids, everything())
+```
+
+```{r add_boyce_models, include = F}
+# Local
+#amaze_naturalstories_rootdir <- "~/DATA/amaze-natural-stories/"
+# Or just grab it from GH
+amaze_naturalstories_rootdir <- "https://raw.githubusercontent.com/vboyce/amaze-natural-stories/master/"
+
+#  Boyce's surprisal estimates where tokencount_* is > 1 are excluded in their study https://amlap2020.github.io/a/154.pdf
+#  We'll do the same (case_when will replace with NA when condition is not met)
+
+# Note: Boyce's surprisals are in bits. I'll be using nats.
+# log(x, base = 2) bits == log(x) nats / log(2) 
+# surprisal_nats = surprisal_bits * log(2) (bits per nat)
+
+boyce_surprisals <- readRDS(
+  url(paste0(amaze_naturalstories_rootdir,
+             "Prep_code/natural_stories_surprisals.rds"))
+  ) %>% mutate(across(
+    c(contains("_surp")),
+    .fns=list("nats"=function(x){log(2) * x}),
+    .names="{.col}_{.fn}")) %>%
+  select(-ends_with("_surp")) %>%
+  rename(
+    surp_boyce_ngram = ngram_surp_nats,
+    surp_boyce_grnn = grnn_surp_nats,
+    surp_boyce_txl = txl_surp_nats,
+    tokencount_boyce_ngram = ngram_token_count,
+    tokencount_boyce_grnn = grnn_token_count,
+    tokencount_boyce_txl = txl_token_count) %>% 
+  # drop all the surprisals from words that were tokenized as multiple words (boyce does this too)
+  mutate(surp_boyce_ngram = case_when(tokencount_boyce_ngram == 1 ~ surp_boyce_ngram),
+         surp_boyce_grnn = case_when(tokencount_boyce_grnn == 1 ~ surp_boyce_grnn),
+         surp_boyce_txl = case_when(tokencount_boyce_txl == 1 ~ surp_boyce_txl))
+
+# Note, when merging, I'll not merge on the word column.
+# the "Word" column from Boyce data doesn't correspond with the word token "word" column (former has punctuation latter doesn't)
+# but "Word" should equal "word_human" (from naturalstories RT). But I'll just leave them separate.
+
+surps.RTs <- full_join(
+  gpts.RTs, boyce_surprisals,
+  by=c("word_num_in_story" = "Word_In_Story_Num",
+       "story_num" = "Story_Num")) %>% 
+  left_join(
+    read_delim(
+      paste0(amaze_naturalstories_rootdir,
+             "Materials/natural_stories_sentences.tsv"),
+      delim="\t"),
+    by=c("story_num"="Story_Num","Sentence_Num")) %>% 
+  select(word_num_in_sentence = Word_In_Sentence_Num,
+         sentence_num = Sentence_Num, sentence = Sentence,
+         everything()) %>% 
+  ungroup()
+
+surps.RTs.perword <- full_join(
+  gpts.RTs.perword, boyce_surprisals,
+  by=c("word_num_in_story"="Word_In_Story_Num", 
+       "story_num"="Story_Num")) %>% 
+  left_join(
+    read_delim(
+      paste0(amaze_naturalstories_rootdir,
+             "Materials/natural_stories_sentences.tsv"),
+      delim="\t"),
+    by=c("story_num"="Story_Num","Sentence_Num")) %>% 
+  select(word_num_in_sentence=Word_In_Sentence_Num,
+         sentence_num=Sentence_Num, sentence=Sentence,
+         everything()) %>% 
+  ungroup()
+
+### DO the above with TransXL as well
+
+surps_lms.RTs <- full_join(
+  lms.RTs, boyce_surprisals,
+  by=c("word_num_in_story"="Word_In_Story_Num",
+       "story_num"="Story_Num")) %>% 
+  left_join(
+    read_delim(
+      paste0(amaze_naturalstories_rootdir,"Materials/natural_stories_sentences.tsv"),
+      delim="\t"),
+    by=c("story_num"="Story_Num","Sentence_Num")) %>% 
+  select(word_num_in_sentence=Word_In_Sentence_Num, 
+         sentence_num=Sentence_Num, sentence=Sentence, everything()) %>% 
+  ungroup()
+
+surps_lms.RTs.perword <- full_join(
+  lms.RTs.perword, boyce_surprisals,
+  by=c("word_num_in_story"="Word_In_Story_Num", 
+       "story_num"="Story_Num")) %>% 
+  left_join(
+    read_delim(
+      paste0(amaze_naturalstories_rootdir,"Materials/natural_stories_sentences.tsv"),
+      delim="\t"),
+    by=c("story_num"="Story_Num","Sentence_Num")) %>% 
+  select(word_num_in_sentence=Word_In_Sentence_Num, 
+         sentence_num=Sentence_Num, sentence=Sentence, everything()) %>% 
+  ungroup()
+```
+
+```{r}
+gpt_num_tokens_kept <- nrow(surps_lms.RTs.perword %>% filter(is_in_common_vocab, !is.na(gpt2_word_id)))
+txl_num_tokens_kept <- nrow(surps_lms.RTs.perword %>% filter(is_in_common_vocab, !is.na(txl_word_id)))
+boyce_num_tokens_kept <- nrow(surps_lms.RTs.perword %>% filter(is_in_common_vocab, !is.na(tokencount_boyce_txl)))
+gpt_num_tokens_total <- nrow(surps_lms.RTs.perword %>% filter(!is.na(gpt2_word_id)))
+txl_num_tokens_total <- nrow(surps_lms.RTs.perword %>% filter(!is.na(txl_word_id)))
+boyce_num_tokens_total <- nrow(surps_lms.RTs.perword %>% filter(!is.na(tokencount_boyce_txl)))
+gpt_prop_tokens_kept <- gpt_num_tokens_kept / gpt_num_tokens_total
+txl_prop_tokens_kept <- txl_num_tokens_kept / txl_num_tokens_total
+boyce_prop_tokens_kept <- boyce_num_tokens_kept / boyce_num_tokens_total
+
+print(
+  data.frame(
+    name = c("GPT", "TXL", "Boyce ngram and LSTM"),
+    n_tokens_kept = c(gpt_num_tokens_kept, txl_num_tokens_kept, boyce_num_tokens_kept),
+    n_total_tokens =  c(gpt_num_tokens_total, txl_num_tokens_total, boyce_num_tokens_total),
+    pct_tokens_kept = c(gpt_prop_tokens_kept, txl_prop_tokens_kept, boyce_prop_tokens_kept)))
+```
+
+Excluding words where tokenization is different, about 80% of tokens remain.
+
+# Export
+
+```{r}
+# save as rds compressed because surps_lms.RTs.csv would be over 1GB
+write_rds(surps_lms.RTs, "natural-stories-surprisals/COMPUTE-surps/surps_lms.RTs.rds", compress = "gz")
+write_rds(surps_lms.RTs.perword,"natural-stories-surprisals/COMPUTE-surps/surps_lms.RTs.perword.rds", compress = "gz")
+```
