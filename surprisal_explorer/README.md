@@ -4,4 +4,4 @@ An interactive visualization of LM surprisals and human reading times on Natural
 **https://jahoo.shinyapps.io/surprisal_explorer/**
 
 
-<a href="https://jahoo.shinyapps.io/surprisal_explorer/"><img src="img/surprisal_explorer_snapshot.png" width="500"></img></a>
+<a href="https://jahoo.shinyapps.io/surprisal_explorer/"><img src="/img/surprisal_explorer_snapshot.png" width="500"></img></a>
