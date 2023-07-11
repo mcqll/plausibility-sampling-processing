@@ -1,10 +1,10 @@
-This repository contains code to accompany the article **The Plausibility of Sampling as an Algorithmic Theory of Sentence Processing**. Jacob Louis Hoover, Morgan Sonderegger, Steven T. Piantadosi, Timothy J. O'Donnell. Forthcoming in _Open Mind_ (2023). 
+This repository contains code to accompany the article **The Plausibility of Sampling as an Algorithmic Theory of Sentence Processing**. Jacob Louis Hoover, Morgan Sonderegger, Steven T. Piantadosi, Timothy J. O'Donnell. _Open Mind: Discoveries in Cognitive Science_ (2023). DOI: [10.1162/opmi_a_00086](https://doi.org/10.1162/opmi_a_00086). Preprint: [osf.io/qjnpv](https://doi.org/10.31234/osf.io/qjnpv)
 
-- Preprint: [osf.io/qjnpv](https://doi.org/10.31234/osf.io/qjnpv)
-
-- See here for [Surprisal Explorer](https://jahoo.shinyapps.io/surprisal_explorer/) --- interactive visualization of LM surprisals and human reading times on Natural Stories.
+- See here for [Surprisal Explorer](https://jahoo.shinyapps.io/surprisal_explorer/) --- an interactive visualization of LM surprisals and human reading times on Natural Stories.
 
     <a href="https://jahoo.shinyapps.io/surprisal_explorer/"><img src="img/surprisal_explorer_snapshot.png" width="500"></img></a>
+
+- For replication instructions for results and figures in the paper see below.
 
 ## Replication
 
@@ -150,13 +150,16 @@ _Note this section is about constant variance models, which are only in the appe
 
 Citation:
 ```bib
-@misc{hoover.j:2022psyarxiv,
-  title = {The Plausibility of Sampling as an Algorithmic Theory of Sentence Processing},
-  author = {Hoover, Jacob Louis and Sonderegger, Morgan and Piantadosi, Steven T. and O'Donnell, Timothy J.},
-  year = {2022},
-  month = oct,
-  publisher = {{PsyArXiv}},
-  doi = {10.31234/osf.io/qjnpv},
-  note = {To appear in Open Mind}
+@article{10.1162/opmi_a_00086,
+    author = {Hoover, Jacob Louis and Sonderegger, Morgan and Piantadosi, Steven T. and O’Donnell, Timothy J.},
+    title = {The plausibility of sampling as an algorithmic theory of sentence processing},
+    journal = {Open Mind: Discoveries in Cognitive Science},
+    pages = {1-42},
+    year = {2023},
+    month = {06},
+    issn = {2470-2986},
+    doi = {10.1162/opmi_a_00086},
+    url = {https://doi.org/10.1162/opmi\_a\_00086},
+    eprint = {https://direct.mit.edu/opmi/article-pdf/doi/10.1162/opmi\_a\_00086/2138378/opmi\_a\_00086.pdf},
 }
 ```
