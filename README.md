@@ -154,12 +154,15 @@ Citation:
     author = {Hoover, Jacob Louis and Sonderegger, Morgan and Piantadosi, Steven T. and O’Donnell, Timothy J.},
     title = {The plausibility of sampling as an algorithmic theory of sentence processing},
     journal = {Open Mind: Discoveries in Cognitive Science},
-    pages = {1-42},
+    volume = {7},
+    pages = {350--391},
     year = {2023},
-    month = {06},
+    month = {07},
+    day = {21},
     issn = {2470-2986},
     doi = {10.1162/opmi_a_00086},
     url = {https://doi.org/10.1162/opmi\_a\_00086},
     eprint = {https://direct.mit.edu/opmi/article-pdf/doi/10.1162/opmi\_a\_00086/2138378/opmi\_a\_00086.pdf},
+    code = {https://github.com/mcqll/plausibility-sampling-processing/}
 }
 ```
